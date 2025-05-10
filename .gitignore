@@ -1,3 +1,12 @@
+# [PNTO] Pinto Engine
+
+Assets/
+src/pinto_compiler/media/
+src/quartus/fpga/output_files/
+src/quartus/fpga/greybox_temp/
+*.bin
+*.core
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

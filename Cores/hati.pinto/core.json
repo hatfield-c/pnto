@@ -1,0 +1,36 @@
+{
+    "core": {
+        "magic": "APF_VER_1",
+        "metadata": {
+            "platform_ids": [
+                "pinto"
+            ],
+            "shortname": "pinto",
+            "description": "Pinto Engine - Pocket Integer Engine",
+            "author": "hati",
+            "url": "",
+            "version": "0.0.1",
+            "date_release": "2025-05-7"
+        },
+        "framework": {
+            "target_product": "Analogue Pocket",
+            "version_required": "1.1",
+            "sleep_supported": false,
+            "dock": {
+                "supported": false,
+                "analog_output": false
+            },
+            "hardware": {
+                "link_port": false,
+                "cartridge_adapter": -1
+            }
+        },
+        "cores": [
+            {
+                "name": "default",
+                "id": 0,
+                "filename": "pinto.core"
+            }
+        ]
+    }
+}

@@ -6,6 +6,7 @@ src/quartus/fpga/output_files/
 src/quartus/fpga/greybox_temp/
 *.bin
 *.core
+src/pinto_compiler/arborium.pinto
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

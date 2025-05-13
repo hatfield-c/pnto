@@ -6,7 +6,7 @@
 
 `default_nettype none
 
-module pinto_linebuf (
+module pinto_rambuf (
 	data,
 	rdaddress,
 	rdclock,
@@ -571,152 +571,157 @@ synch_3 s2(osnotify_inmenu, osnotify_inmenu_s, video_rgb_clock);
     wire    [15:0]  cont1_key_s;
 synch_3 #(.WIDTH(16)) s22(cont1_key, cont1_key_s, video_rgb_clock);
 
+// Pinto Engine
+
+	// CPU and GFX ping pong control buffer
+	reg [31:0] frame_buffer_addr = 0;
+	reg [31:0] frame_buffer_addr0 = 0;
+	reg [31:0] frame_buffer_addr1 = 76800;
 
 always @(posedge video_rgb_clock or negedge reset_n) begin
+	 if(~reset_n) begin
+	 
+		  x_count <= 0;
+		  y_count <= 0;
+		  
+	 end else begin
+		  vidout_de <= 0;
+		  vidout_skip <= 0;
+		  vidout_vs <= 0;
+		  vidout_hs <= 0;
+		  
+		  vidout_hs_1 <= vidout_hs;
+		  vidout_de_1 <= vidout_de;
+		  
+		  // signals for the ram interface
+		  new_frame <= 0;
+		  next_line <= 0;
+		  
+		  // x and y counters
+		  x_count <= x_count + 1'b1;
+		  if(x_count == VID_H_TOTAL-1) begin
+				x_count <= 0;
+				
+				y_count <= y_count + 1'b1;
+				if(y_count == VID_V_TOTAL-1) begin
+					 y_count <= 0;
+				end
+		  end
+		  
+		  // generate sync 
+		  if(x_count == 0 && y_count == 0) begin
+				// sync signal in back porch
+				// new frame
+				vidout_vs <= 1;
+				new_frame <= 1;
+				
+				if(!osnotify_inmenu_s) begin
+					 frame_count <= frame_count + 1'b1;
+				end
+		  end
+		  
+		  // we want HS to occur a bit after VS, not on the same cycle
+		  if(x_count == 3) begin
+				// sync signal in back porch
+				// new line
+				vidout_hs <= 1;
+				
+				// trigger the next_line signal 1 line ahead of the first visible line, to account for buffering
+				if(y_count >= VID_V_BPORCH-1 && y_count < VID_V_ACTIVE+VID_V_BPORCH) begin
+					 next_line <= 1;
+					 linebuf_toggle <= linebuf_toggle ^ 1;
+				end
+		  end
+				
+		  // generate scanline buffer addressing
+		  // because our scanline BRAM is registered, it has an additional cycle of latency, 
+		  // so we must start incrementing its address a cycle early
+		  if(x_count >= VID_H_BPORCH-1) begin
+				linebuf_rdaddr <= linebuf_rdaddr + 1'b1;
+		  end else begin
+				linebuf_rdaddr <= 0;
+		  end
+		  
+		  // inactive screen areas are black
+		  vidout_rgb <= 24'h0;
+		  // generate active video
+		  if(x_count >= VID_H_BPORCH && x_count < VID_H_ACTIVE+VID_H_BPORCH) begin
 
-    if(~reset_n) begin
-    
-        x_count <= 0;
-        y_count <= 0;
-        
-    end else begin
-        vidout_de <= 0;
-        vidout_skip <= 0;
-        vidout_vs <= 0;
-        vidout_hs <= 0;
-        
-        vidout_hs_1 <= vidout_hs;
-        vidout_de_1 <= vidout_de;
-        
-        // signals for the ram interface
-        new_frame <= 0;
-        next_line <= 0;
-        
-        // x and y counters
-        x_count <= x_count + 1'b1;
-        if(x_count == VID_H_TOTAL-1) begin
-            x_count <= 0;
-            
-            y_count <= y_count + 1'b1;
-            if(y_count == VID_V_TOTAL-1) begin
-                y_count <= 0;
-            end
-        end
-        
-        // generate sync 
-        if(x_count == 0 && y_count == 0) begin
-            // sync signal in back porch
-            // new frame
-            vidout_vs <= 1;
-            new_frame <= 1;
-            
-            if(!osnotify_inmenu_s) begin
-                frame_count <= frame_count + 1'b1;
-            end
-        end
-        
-        // we want HS to occur a bit after VS, not on the same cycle
-        if(x_count == 3) begin
-            // sync signal in back porch
-            // new line
-            vidout_hs <= 1;
-            
-            // trigger the next_line signal 1 line ahead of the first visible line, to account for buffering
-            if(y_count >= VID_V_BPORCH-1 && y_count < VID_V_ACTIVE+VID_V_BPORCH) begin
-                next_line <= 1;
-                linebuf_toggle <= linebuf_toggle ^ 1;
-            end
-        end
-            
-        // generate scanline buffer addressing
-        // because our scanline BRAM is registered, it has an additional cycle of latency, 
-        // so we must start incrementing its address a cycle early
-        if(x_count >= VID_H_BPORCH-1) begin
-            linebuf_rdaddr <= linebuf_rdaddr + 1'b1;
-        end else begin
-            linebuf_rdaddr <= 0;
-        end
-        
-        // inactive screen areas are black
-        vidout_rgb <= 24'h0;
-        // generate active video
-        if(x_count >= VID_H_BPORCH && x_count < VID_H_ACTIVE+VID_H_BPORCH) begin
-
-            if(y_count >= VID_V_BPORCH && y_count < VID_V_ACTIVE+VID_V_BPORCH) begin
-                // data enable. this is the active region of the line
-                vidout_de <= 1;
-                
+				if(y_count >= VID_V_BPORCH && y_count < VID_V_ACTIVE+VID_V_BPORCH) begin
+					 // data enable. this is the active region of the line
+					 vidout_de <= 1;
+					 
 					 // convert RGBA8888 to RGB888
-                vidout_rgb[23:16] <= linebuf_q[31:24];//{linebuf_q[15:11], linebuf_q[15:13]};
-                vidout_rgb[15:8]  <= linebuf_q[23:16];//{linebuf_q[10:5], linebuf_q[10:9]};
-                vidout_rgb[7:0]   <= linebuf_q[15:8];//{linebuf_q[4:0], linebuf_q[4:2]};
-            
-                if(screen_border_s) begin
-                    // add colored borders for debugging
-                    if(visible_x == 0) begin
-                        vidout_rgb <= 24'hFFFFFF;
-                    end else if(visible_x == VID_H_ACTIVE-1) begin
-                        vidout_rgb <= 24'h00FF00;
-                    end else if(visible_y == 0) begin
-                        vidout_rgb <= 24'hFF0000;
-                    end else if(visible_y == VID_V_ACTIVE-1) begin
-                        vidout_rgb <= 24'h0000FF;
-                    end
-                end
-                
-                // generate square
-                if(visible_x >= square_x && visible_x < square_x+50) begin
-                    if(visible_y >= square_y && visible_y < square_y+50) begin
-                        vidout_rgb <= 24'h0; 
-                    end
-                end
-                if(visible_x >= square_x+1 && visible_x < square_x+50-1) begin
-                    if(visible_y >= square_y+1 && visible_y < square_y+50-1) begin
-                        // change color of the square based on button state.
-                        // note: because the button state could change in the middle of the frame,
-                        // tearing on the square color could occur, but this is normal.
-                        if(cont1_key_s[4])    
-                            vidout_rgb <= 24'hFF0000; 
-                        else if(cont1_key_s[5])   
-                            vidout_rgb <= 24'h00FF00; 
-                        else 
-                            vidout_rgb <= 24'hFFFFFF; 
-                    end
-                end
-                
-            end 
-        end
-        
-        if(vidout_vs) begin
-            // vertical sync, new frame pulse (actually occurred on the previous cycle)
-            // this will actually cause tearing but only on the upperleft-most pixel
-            
-            if(cont1_key_s[0]) begin
-                // d-pad up
-                if(square_y > $signed(0)) square_y <= square_y - 'd1;
-            end
-            if(cont1_key_s[1]) begin
-                // d-pad down
-                if(square_y < $signed(VID_V_ACTIVE-50)) square_y <= square_y + 'd1;
-            end
-            if(cont1_key_s[2]) begin
-                // d-pad left
-                if(square_x > $signed(0)) square_x <= square_x - 'd1;
-            end
-            if(cont1_key_s[3]) begin
-                // d-pad right
-                if(square_x < $signed(VID_H_ACTIVE-50)) square_x <= square_x + 'd1;
-            end
-            
-            
-            if(osnotify_inmenu_s) begin
-                // slide square across screen while menu is open
-                square_x <= square_x + 'd1;
-                // wrap it over the edge
-                if(square_x == VID_H_ACTIVE) square_x <= -50;
-            end
-        end
-    end
+					 vidout_rgb[23:16] <= linebuf_q[31:24];
+					 vidout_rgb[15:8]  <= linebuf_q[23:16];
+					 vidout_rgb[7:0]   <= linebuf_q[15:8];
+				
+					 if(screen_border_s) begin
+						  // add colored borders for debugging
+						  if(visible_x == 0) begin
+								vidout_rgb <= 24'hFFFFFF;
+						  end else if(visible_x == VID_H_ACTIVE-1) begin
+								vidout_rgb <= 24'h00FF00;
+						  end else if(visible_y == 0) begin
+								vidout_rgb <= 24'hFF0000;
+						  end else if(visible_y == VID_V_ACTIVE-1) begin
+								vidout_rgb <= 24'h0000FF;
+						  end
+					 end
+					 
+					 // generate square
+					 if(visible_x >= square_x && visible_x < square_x+50) begin
+						  if(visible_y >= square_y && visible_y < square_y+50) begin
+								vidout_rgb <= 24'h0; 
+						  end
+					 end
+					 if(visible_x >= square_x+1 && visible_x < square_x+50-1) begin
+						  if(visible_y >= square_y+1 && visible_y < square_y+50-1) begin
+								// change color of the square based on button state.
+								// note: because the button state could change in the middle of the frame,
+								// tearing on the square color could occur, but this is normal.
+								if(cont1_key_s[4])    
+									 vidout_rgb <= 24'hFF0000; 
+								else if(cont1_key_s[5])   
+									 vidout_rgb <= 24'h00FF00; 
+								else 
+									 vidout_rgb <= 24'hFFFFFF; 
+						  end
+					 end
+					 
+				end 
+		  end
+		  
+		  if(vidout_vs) begin
+				// vertical sync, new frame pulse (actually occurred on the previous cycle)
+				// this will actually cause tearing but only on the upperleft-most pixel
+				
+				if(cont1_key_s[0]) begin
+					 // d-pad up
+					 if(square_y > $signed(0)) square_y <= square_y - 'd1;
+				end
+				if(cont1_key_s[1]) begin
+					 // d-pad down
+					 if(square_y < $signed(VID_V_ACTIVE-50)) square_y <= square_y + 'd1;
+				end
+				if(cont1_key_s[2]) begin
+					 // d-pad left
+					 if(square_x > $signed(0)) square_x <= square_x - 'd1;
+				end
+				if(cont1_key_s[3]) begin
+					 // d-pad right
+					 if(square_x < $signed(VID_H_ACTIVE-50)) square_x <= square_x + 'd1;
+				end
+				
+				
+				if(osnotify_inmenu_s) begin
+					 // slide square across screen while menu is open
+					 square_x <= square_x + 'd1;
+					 // wrap it over the edge
+					 if(square_x == VID_H_ACTIVE) square_x <= -50;
+				end
+		  end
+	 end
 end
 
     reg             next_line;
@@ -773,7 +778,7 @@ always @(posedge clk_ram_controller) begin
             // when displaying a contiguous buffer, we must determine the scanline
             // address with a multiplier. a better way is to fix the scanlines onto a 1024-word alignment
             // and correct the addressing as data is copied in.
-            ram1_burst_addr <= rr_line * VID_H_ACTIVE * 2; 
+            ram1_burst_addr <= (rr_line * VID_H_ACTIVE * 2) + frame_buffer_addr; 
             ram1_burst_len <= 1024;
             ram1_burst_32bit <= 1'b1;
             
@@ -893,7 +898,6 @@ initial begin
     //audgen_sampptr_offset = 0;
 end
     
-
     // synchronize the button input
     //wire            button_playaudio_s;
 //synch_3 s8(cont1_key[6], button_playaudio_s, clk_74a);
@@ -901,7 +905,6 @@ end
 always @(posedge clk_74a) begin
     ram1_word_rd <= 0;
     ram1_word_wr <= 0;
-    
     
     // if APF wants to reload a slot, stop hitting ram
     if(dataslot_requestwrite) begin
@@ -945,6 +948,15 @@ always @(posedge clk_74a) begin
         endcase
         
     end
+	 
+	 // add CPU logic here
+	 if(cont1_key_s[0]) begin
+		 // d-pad up
+		frame_buffer_addr <= frame_buffer_addr1;
+	 end
+	 if(cont1_key_s[1]) begin
+		frame_buffer_addr <= frame_buffer_addr0;
+	 end
     
  /*
     // audio wants to read another sample
@@ -1016,7 +1028,7 @@ synch_3 s9(linebuf_toggle, linebuf_toggle_s, clk_ram_controller);
     reg     [31:0]  linebuf_data;
     reg             linebuf_wren;
 	 
-pinto_linebuf  pinto_linebuf_inst (
+pinto_rambuf  pinto_linebuf_inst (
     .rdclock        ( clk_core_12288 ),
     .rdaddress      ( linebuf_rdaddr_fix ),
     .q              ( linebuf_q ),
@@ -1026,8 +1038,7 @@ pinto_linebuf  pinto_linebuf_inst (
     .data           ( linebuf_data ),
     .wren           ( linebuf_wren )
 );
-
-
+ 
     reg             ram1_burst_rd; // must be synchronous to clk_ram
     reg     [24:0]  ram1_burst_addr;
     reg     [10:0]  ram1_burst_len;
